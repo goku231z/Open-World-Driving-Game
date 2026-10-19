@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 오픈월드 리얼 드라이빙 시뮬레이터</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Pretendard', 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            background-color: #050505;
+            color: #fff;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .hud-glass {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .modal-glass {
+            background: rgba(10, 15, 29, 0.92);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .gauge-circle {
+            transition: stroke-dashoffset 0.08s linear;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.25);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- HUD OVERLAY (Z-INDEX 10) -->
+    <div id="hud" class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-4 md:p-6">
+        
+        <!-- Top Header: Cash, Active Mission & Menu Triggers -->
+        <div class="flex justify-between items-start">
+            <!-- Left Info: Balance & Active Mission Tracker -->
+            <div class="flex flex-col gap-3">
+                <div class="hud-glass rounded-2xl p-4 flex items-center space-x-3 shadow-2xl pointer-events-auto">
+                    <div class="bg-emerald-500/20 text-emerald-400 p-3 rounded-xl border border-emerald-500/30">
+                        <i class="fa-solid fa-wallet text-2xl"></i>
+                    </div>
+                    <div>
+                        <div class="text-xs uppercase tracking-wider text-slate-400 font-bold">소지금 (Balance)</div>
+                        <div id="cash-display" class="text-2xl font-black text-emerald-400">₩2,500,000</div>
+                    </div>
+                </div>
+
+                <!-- Active Mission Tracker -->
+                <div id="mission-hud" class="hud-glass rounded-2xl p-4 w-80 shadow-2xl pointer-events-auto transition-all">
+                    <div class="flex items-center justify-between text-amber-400 font-bold mb-1 text-sm">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-route"></i>
+                            <span id="mission-title">미션 진행 중</span>
+                        </div>
+                        <span id="mission-reward" class="text-xs bg-amber-400/20 px-2 py-0.5 rounded text-amber-300">+₩0</span>
+                    </div>
+                    <p id="mission-desc" class="text-xs text-slate-300 leading-relaxed">내비게이션 GPS 마커를 따라 목적지까지 이동하세요.</p>
+                </div>
+            </div>
+
+            <!-- Right Info: Garage/Shop, Tuning, Dynamic Time & Guide -->
+            <div class="flex space-x-2 md:space-x-3 pointer-events-auto">
+                <button id="btn-open-shop" onclick="toggleGarage('shop')" class="hud-glass hover:bg-slate-700/80 text-white font-bold py-3 px-4 rounded-2xl flex items-center space-x-2 transition border border-white/10 shadow-lg active:scale-95 text-xs md:text-sm">
+                    <i class="fa-solid fa-store text-amber-400"></i>
+                    <span>차량 상점 [B]</span>
+                </button>
+                <button id="btn-open-tuning" onclick="toggleGarage('tuning')" class="hud-glass hover:bg-slate-700/80 text-white font-bold py-3 px-4 rounded-2xl flex items-center space-x-2 transition border border-white/10 shadow-lg active:scale-95 text-xs md:text-sm">
+                    <i class="fa-solid fa-gears text-sky-400"></i>
+                    <span>튜닝 샵 [T]</span>
+                </button>
+                <button onclick="toggleDayNight()" class="hud-glass hover:bg-slate-700/80 text-white p-3 rounded-2xl transition border border-white/10 shadow-lg active:scale-95">
+                    <i id="time-icon" class="fa-solid fa-sun text-xl text-amber-300"></i>
+                </button>
+                <button onclick="toggleHelpModal()" class="hud-glass hover:bg-slate-700/80 text-white p-3 rounded-2xl transition border border-white/10 shadow-lg active:scale-95">
+                    <i class="fa-solid fa-circle-question text-xl text-sky-400"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Center Notification Toast -->
+        <div id="notification-toast" class="self-center hud-glass px-6 py-3 rounded-full text-center text-sm font-bold text-amber-300 border border-amber-500/30 shadow-2xl transition-all duration-300 opacity-0 transform translate-y-4">
+            오픈월드 드라이빙에 오신 것을 환영합니다! Shift+E/Q로 기어를 변속하세요.
+        </div>
+
+        <!-- Bottom Dashboard: Speedometer, Gear, Minimap & Touch Controls -->
+        <div class="flex justify-between items-end">
+            <!-- Left: Speedometer & RPM / Gear Dashboard -->
+            <div class="hud-glass rounded-3xl p-4 md:p-5 flex items-center space-x-4 md:space-x-6 shadow-2xl border border-white/10 pointer-events-auto">
+                <!-- Gear Display -->
+                <div class="text-center">
+                    <div class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">기어 (GEAR)</div>
+                    <div id="gear-display" class="text-3xl md:text-4xl font-black text-sky-400 bg-slate-900/80 rounded-2xl w-14 h-14 md:w-16 md:h-16 flex items-center justify-center border border-sky-500/30 shadow-inner">
+                        N
+                    </div>
+                    <div class="text-[9px] text-slate-400 mt-1 font-mono">Shift+E / Q</div>
+                </div>
+
+                <!-- Analog Speed Dial -->
+                <div class="relative w-24 h-24 md:w-28 md:h-28 flex items-center justify-center">
+                    <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="8" class="text-slate-800" fill="transparent" />
+                        <circle id="speed-gauge" cx="50" cy="50" r="40" stroke="currentColor" stroke-width="8" class="text-sky-400 gauge-circle" fill="transparent" stroke-dasharray="251.2" stroke-dashoffset="251.2" stroke-linecap="round" />
+                    </svg>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center">
+                        <span id="speed-display" class="text-2xl md:text-3xl font-black tracking-tighter">0</span>
+                        <span class="text-[9px] font-bold uppercase text-slate-400 tracking-wider">KM/H</span>
+                    </div>
+                </div>
+
+                <!-- RPM Bar & Vehicle Stats Controls -->
+                <div class="flex flex-col justify-center space-y-2 w-24 md:w-28">
+                    <div>
+                        <div class="flex justify-between text-[10px] font-bold text-slate-400 mb-1">
+                            <span>RPM</span>
+                            <span id="rpm-text">800</span>
+                        </div>
+                        <div class="bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
+                            <div id="rpm-bar" class="bg-gradient-to-r from-sky-400 via-amber-400 to-rose-500 h-full w-0 transition-all duration-75"></div>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center text-xs pt-1">
+                        <span class="text-slate-400 text-[10px] font-bold">헤드라이트</span>
+                        <button id="btn-headlights" onclick="toggleHeadlights()" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">OFF [L]</button>
+                    </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-400 text-[10px] font-bold">시점 전환</span>
+                        <button onclick="toggleCamera()" class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-600/30 text-sky-300 border border-sky-500/40">[C]</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile Touch Controls -->
+            <div class="md:hidden flex flex-col items-center space-y-2 pointer-events-auto">
+                <div class="flex space-x-2">
+                    <button id="btn-touch-shift-up" class="w-10 h-10 rounded-xl bg-slate-800/80 text-sky-400 border border-sky-500/30 font-bold active:bg-sky-600 active:text-white">G+</button>
+                    <button id="btn-touch-shift-down" class="w-10 h-10 rounded-xl bg-slate-800/80 text-sky-400 border border-sky-500/30 font-bold active:bg-sky-600 active:text-white">G-</button>
+                </div>
+                <div class="grid grid-cols-3 gap-1 w-32">
+                    <div></div>
+                    <button id="btn-touch-up" class="w-10 h-10 rounded-xl bg-slate-800/80 text-white font-bold active:bg-slate-600 flex items-center justify-center"><i class="fa-solid fa-chevron-up"></i></button>
+                    <div></div>
+                    <button id="btn-touch-left" class="w-10 h-10 rounded-xl bg-slate-800/80 text-white font-bold active:bg-slate-600 flex items-center justify-center"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button id="btn-touch-down" class="w-10 h-10 rounded-xl bg-slate-800/80 text-white font-bold active:bg-slate-600 flex items-center justify-center"><i class="fa-solid fa-chevron-down"></i></button>
+                    <button id="btn-touch-right" class="w-10 h-10 rounded-xl bg-slate-800/80 text-white font-bold active:bg-slate-600 flex items-center justify-center"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+
+            <!-- Right: Dynamic Minimap Navigation -->
+            <div class="hud-glass rounded-3xl p-3 shadow-2xl border border-white/10 pointer-events-auto relative overflow-hidden">
+                <div class="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-wider flex justify-between items-center px-1">
+                    <span>GPS 미니맵</span>
+                    <i class="fa-solid fa-location-arrow text-sky-400"></i>
+                </div>
+                <canvas id="minimap-canvas" width="130" height="130" class="rounded-2xl bg-slate-950 border border-slate-800"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- GARAGE & VEHICLE SHOP / TUNING MODAL (Z-INDEX 20) -->
+    <div id="garage-modal" class="fixed inset-0 z-20 flex items-center justify-center bg-black/80 backdrop-blur-md hidden transition-all duration-300">
+        <div class="modal-glass w-11/12 max-w-5xl rounded-3xl p-6 md:p-8 flex flex-col max-h-[90vh] shadow-2xl border border-white/20">
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center pb-4 border-b border-slate-800">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-amber-500/20 text-amber-400 p-3 rounded-2xl border border-amber-500/30">
+                        <i class="fa-solid fa-warehouse text-2xl"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-black text-white tracking-wide">차량 상점 & 커스텀 튜닝 샵</h2>
+                        <p class="text-xs text-slate-400">원하는 차량을 구매하고 성능 및 외관/내부를 커스터마이징하세요.</p>
+                    </div>
+                </div>
+                <button onclick="toggleGarage(null, false)" class="text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 p-3 rounded-2xl transition">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Tabs Header -->
+            <div class="flex space-x-4 my-4 border-b border-slate-800/80">
+                <button id="tab-btn-shop" onclick="switchGarageTab('shop')" class="py-2 px-4 font-bold text-sm text-amber-400 border-b-2 border-amber-400 transition">차량 전시장 & 상점 [B]</button>
+                <button id="tab-btn-tuning" onclick="switchGarageTab('tuning')" class="py-2 px-4 font-bold text-sm text-slate-400 border-b-2 border-transparent hover:text-white transition">외관 및 내부 튜닝 [T]</button>
+            </div>
+
+            <!-- Tab Content Area -->
+            <div class="flex-1 overflow-y-auto pr-2 py-2">
+                <!-- SHOP TAB -->
+                <div id="tab-content-shop" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <!-- Dynamic Vehicle Cards -->
+                </div>
+
+                <!-- TUNING TAB -->
+                <div id="tab-content-tuning" class="hidden grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Exterior Customization -->
+                    <div class="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 space-y-4">
+                        <h3 class="text-base font-bold text-sky-400 flex items-center space-x-2">
+                            <i class="fa-solid fa-spray-can"></i>
+                            <span>외관 커스터마이징 (Exterior)</span>
+                        </h3>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 mb-2">차량 도색 (Body Color)</label>
+                            <div class="flex items-center space-x-3">
+                                <input type="color" id="tuning-paint-color" value="#3b82f6" onchange="applyTuning('color', this.value)" class="w-12 h-10 rounded cursor-pointer bg-slate-800 border border-slate-700 p-1">
+                                <span class="text-xs text-slate-300 font-mono" id="color-hex-label">#3b82f6</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 mb-2">네온 언더글로우 (Neon Glow)</label>
+                            <div class="flex items-center space-x-3">
+                                <input type="color" id="tuning-neon-color" value="#00ffff" onchange="applyTuning('neon', this.value)" class="w-12 h-10 rounded cursor-pointer bg-slate-800 border border-slate-700 p-1">
+                                <button onclick="toggleUnderglow()" id="btn-underglow-toggle" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-400 rounded-xl border border-slate-700">네온 켜기/끄기</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 mb-2">휠 림 색상 (Wheel Rims)</label>
+                            <input type="color" id="tuning-rim-color" value="#ffffff" onchange="applyTuning('rimColor', this.value)" class="w-12 h-10 rounded cursor-pointer bg-slate-800 border border-slate-700 p-1">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 mb-2">리어 스포일러 (Rear Spoiler)</label>
+                            <select id="tuning-spoiler" onchange="applyTuning('spoiler', this.value)" class="w-full h-10 bg-slate-800 border border-slate-700 rounded-xl px-3 text-xs text-white">
+                                <option value="none">없음 (None)</option>
+                                <option value="sport">GT 레이싱 스포일러</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Performance Upgrades -->
+                    <div class="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 space-y-4">
+                        <h3 class="text-base font-bold text-amber-400 flex items-center space-x-2">
+                            <i class="fa-solid fa-gauge-high"></i>
+                            <span>성능 튜닝 (Performance)</span>
+                        </h3>
+                        <div class="flex justify-between items-center p-3 bg-slate-800/50 rounded-xl border border-slate-700/50">
+                            <div>
+                                <div class="text-sm font-bold text-white">엔진 스테이지 1 (Engine Tune)</div>
+                                <div class="text-xs text-slate-400">+20% 최고 속도 및 가속력 증가</div>
+                            </div>
+                            <button onclick="buyPerformanceUpgrade('engine')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow">₩1,500,000</button>
+                        </div>
+                        <div class="flex justify-between items-center p-3 bg-slate-800/50 rounded-xl border border-slate-700/50">
+                            <div>
+                                <div class="text-sm font-bold text-white">스포츠 브레이크 시스템</div>
+                                <div class="text-xs text-slate-400">+35% 제동력 강화</div>
+                            </div>
+                            <button onclick="buyPerformanceUpgrade('brakes')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow">₩800,000</button>
+                        </div>
+                    </div>
+
+                    <!-- Interior Customization (First Person Seat View / Bus / Truck Interior) -->
+                    <div class="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 space-y-4 md:col-span-2">
+                        <h3 class="text-base font-bold text-emerald-400 flex items-center space-x-2">
+                            <i class="fa-solid fa-couch"></i>
+                            <span>내부 및 운전석 튜닝 (Interior & Cockpit - 1인칭 시점 전용)</span>
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-400 mb-2">대시보드 커버</label>
+                                <input type="color" id="tuning-dash-color" value="#0f172a" onchange="applyTuning('dashColor', this.value)" class="w-full h-10 rounded cursor-pointer bg-slate-800 border border-slate-700 p-1">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-400 mb-2">시트 가죽 색상</label>
+                                <input type="color" id="tuning-seat-color" value="#1e293b" onchange="applyTuning('seatColor', this.value)" class="w-full h-10 rounded cursor-pointer bg-slate-800 border border-slate-700 p-1">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-400 mb-2">핸들 커버 색상</label>
+                                <input type="color" id="tuning-wheel-color" value="#334155" onchange="applyTuning('wheelColor', this.value)" class="w-full h-10 rounded cursor-pointer bg-slate-800 border border-slate-700 p-1">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-400 mb-2">대시보드 악세서리</label>
+                                <select id="tuning-dash-accessory" onchange="applyTuning('accessory', this.value)" class="w-full h-10 bg-slate-800 border border-slate-700 rounded-xl px-2 text-xs text-white">
+                                    <option value="none">장식 없음</option>
+                                    <option value="bobblehead">흔들리는 인형</option>
+                                    <option value="dice">주사위 장식</option>
+                                    <option value="gps">디지털 내비게이션</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTROLS & INSTRUCTIONS MODAL (Z-INDEX 30) -->
+    <div id="help-modal" class="fixed inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-md hidden">
+        <div class="modal-glass w-11/12 max-w-lg rounded-3xl p-6 shadow-2xl border border-white/20">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+                <h3 class="text-xl font-black text-sky-400 flex items-center space-x-2">
+                    <i class="fa-solid fa-gamepad"></i>
+                    <span>조작법 및 게임 가이드</span>
+                </h3>
+                <button onclick="toggleHelpModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="space-y-3 text-sm text-slate-300">
+                <div class="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                    <span class="font-bold">가속 / 감속·브레이크 / 조향</span>
+                    <span class="font-mono bg-slate-800 px-2 py-1 rounded text-sky-300">W / S / A / D</span>
+                </div>
+                <div class="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                    <span class="font-bold">기어 변속 (수동 변속)</span>
+                    <span class="font-mono bg-slate-800 px-2 py-1 rounded text-amber-300">Shift + E (올림) / Shift + Q (내림)</span>
+                </div>
+                <div class="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                    <span class="font-bold">핸드 브레이크</span>
+                    <span class="font-mono bg-slate-800 px-2 py-1 rounded text-rose-400">Spacebar</span>
+                </div>
+                <div class="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                    <span class="font-bold">카메라 시점 (3인칭 / 1인칭)</span>
+                    <span class="font-mono bg-slate-800 px-2 py-1 rounded text-emerald-400">C 키</span>
+                </div>
+                <div class="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                    <span class="font-bold">차량 상점 / 튜닝 샵</span>
+                    <span class="font-mono bg-slate-800 px-2 py-1 rounded text-purple-400">B 키 / T 키</span>
+                </div>
+                <div class="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                    <span class="font-bold">헤드라이트 On / Off</span>
+                    <span class="font-mono bg-slate-800 px-2 py-1 rounded text-yellow-300">L 키</span>
+                </div>
+            </div>
+            <div class="mt-6 text-center">
+                <button onclick="toggleHelpModal()" class="w-full py-3 bg-sky-600 hover:bg-sky-500 font-bold rounded-2xl transition text-white">확인하고 시작하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN GAME SCRIPT -->
+    <script>
+        /* =========================================================================
+           GAME STATE & CONSTANTS (한국어 설정)
+           ========================================================================= */
+        const GAME_STATE = {
+            cash: 2500000,
+            currentVehicleIndex: 0,
+            cameraMode: 0, // 0 = 3P External, 1 = 1P Driver Cockpit
+            headlightsOn: false,
+            underglowOn: true,
+            isNight: false,
+            activeMission: null,
+            distanceDriven: 0
+        };
+
+        // Vehicles Definitions
+        const VEHICLES = [
+            {
+                id: 'sedan',
+                name: '기본 데일리 세단',
+                type: 'car',
+                price: 0,
+                topSpeed: 140,
+                accel: 20,
+                handling: 0.045,
+                color: 0x3b82f6,
+                rimColor: 0xdddddd,
+                neonColor: 0x00ffff,
+                dashColor: 0x0f172a,
+                seatColor: 0x1e293b,
+                wheelColor: 0x334155,
+                accessory: 'none',
+                hasSpoiler: false,
+                unlocked: true,
+                desc: '안정적인 기본형 승용차입니다. 주행 거리 수당을 얻을 수 있습니다.'
+            },
+            {
+                id: 'coupe',
+                name: '슈퍼 스포츠 쿠페',
+                type: 'car',
+                price: 4500000,
+                topSpeed: 230,
+                accel: 36,
+                handling: 0.06,
+                color: 0xef4444,
+                rimColor: 0x111111,
+                neonColor: 0xff0055,
+                dashColor: 0x450a0a,
+                seatColor: 0x7f1d1d,
+                wheelColor: 0x000000,
+                accessory: 'dice',
+                hasSpoiler: true,
+                unlocked: false,
+                desc: '폭발적인 가속력과 최고 속도를 가진 고성능 스포츠카입니다.'
+            },
+            {
+                id: 'bus',
+                name: '시티 라이너 버스',
+                type: 'bus',
+                price: 8000000,
+                topSpeed: 105,
+                accel: 12,
+                handling: 0.028,
+                color: 0x10b981,
+                rimColor: 0xcccccc,
+                neonColor: 0x00ffaa,
+                dashColor: 0x064e3b,
+                seatColor: 0x022c22,
+                wheelColor: 0x111827,
+                accessory: 'bobblehead',
+                hasSpoiler: false,
+                unlocked: false,
+                desc: '대형 시내버스입니다. 승객 운송 미션에 참여하여 정류장별 고수익을 올릴 수 있습니다.'
+            },
+            {
+                id: 'truck',
+                name: '헤비 카고 카고 트럭',
+                type: 'truck',
+                price: 12000000,
+                topSpeed: 90,
+                accel: 10,
+                handling: 0.022,
+                color: 0xf59e0b,
+                rimColor: 0x333333,
+                neonColor: 0xffaa00,
+                dashColor: 0x78350f,
+                seatColor: 0x451a03,
+                wheelColor: 0x1f2937,
+                accessory: 'gps',
+                hasSpoiler: false,
+                unlocked: false,
+                desc: '대형 6륜 트럭입니다. 물류 창고 화물 배송 미션으로 거액의 수익을 얻을 수 있습니다.'
+            }
+        ];
+
+        // Manual Transmission Gear System
+        const GEARS = [
+            { name: 'R', maxSpeed: -40, accelMult: 0.75 },
+            { name: 'N', maxSpeed: 0, accelMult: 0 },
+            { name: 'D1', maxSpeed: 35, accelMult: 1.0 },
+            { name: 'D2', maxSpeed: 70, accelMult: 0.8 },
+            { name: 'D3', maxSpeed: 110, accelMult: 0.6 },
+            { name: 'D4', maxSpeed: 160, accelMult: 0.45 },
+            { name: 'D5', maxSpeed: 240, accelMult: 0.3 }
+        ];
+
+        /* =========================================================================
+           THREE.JS WORLD SETUP
+           ========================================================================= */
+        let scene, camera, renderer, clock;
+        let vehicleGroup, vehicleBodyMesh, interiorGroup, underglowLight;
+        let headlights = [], taillights = [];
+        let sunLight, ambientLight;
+
+        // Vehicle Physics
+        let currentGearIndex = 1; // Start in Neutral 'N'
+        let currentSpeed = 0; // km/h
+        let currentRPM = 800;
+        let steeringAngle = 0;
+        let vehiclePos = new THREE.Vector3(0, 0, 0);
+        let vehicleRotation = 0;
+
+        // Key Inputs
+        const keys = { w: false, a: false, s: false, d: false, space: false, shift: false };
+
+        // Audio System
+        let audioCtx, engineOsc, skidOsc, gainNode;
+
+        // Landmarks & Mission Coordinates
+        const mapPoints = {
+            busStops: [
+                new THREE.Vector3(-120, 0, -80),
+                new THREE.Vector3(150, 0, 100),
+                new THREE.Vector3(-50, 0, 220)
+            ],
+            cargoDepots: [
+                new THREE.Vector3(220, 0, -180),
+                new THREE.Vector3(-200, 0, -220)
+            ]
+        };
+
+        function initEngine() {
+            const container = document.getElementById('canvas-container');
+            
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0e17);
+            scene.fog = new THREE.FogExp2(0x0a0e17, 0.0025);
+
+            // Camera Setup
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+
+            // Lighting
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            sunLight = new THREE.DirectionalLight(0xfff5ea, 0.9);
+            sunLight.position.set(120, 180, 80);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            scene.add(sunLight);
+
+            // Build Environment & Vehicle
+            buildOpenWorld();
+            buildVehicle();
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            setupInputListeners();
+
+            // Web Audio Synth
+            initAudio();
+
+            // Game Loop
+            animate();
+        }
+
+        /* =========================================================================
+           OPEN WORLD GENERATOR
+           ========================================================================= */
+        function buildOpenWorld() {
+            // Ground
+            const groundGeo = new THREE.PlaneGeometry(1000, 1000);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Road Grid
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5 });
+            const stripeMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+
+            for (let i = -400; i <= 400; i += 100) {
+                // X Roads
+                const roadX = new THREE.Mesh(new THREE.PlaneGeometry(1000, 16), roadMat);
+                roadX.rotation.x = -Math.PI / 2;
+                roadX.position.set(0, 0.05, i);
+                roadX.receiveShadow = true;
+                scene.add(roadX);
+
+                // Z Roads
+                const roadZ = new THREE.Mesh(new THREE.PlaneGeometry(16, 1000), roadMat);
+                roadZ.rotation.x = -Math.PI / 2;
+                roadZ.position.set(i, 0.05, 0);
+                roadZ.receiveShadow = true;
+                scene.add(roadZ);
+            }
+
+            // Buildings Generator
+            const bColors = [0x1e293b, 0x334155, 0x475569, 0x0f172a, 0x1e1b4b];
+            for (let x = -400; x <= 400; x += 100) {
+                for (let z = -400; z <= 400; z += 100) {
+                    if (Math.abs(x) < 30 && Math.abs(z) < 30) continue;
+
+                    for (let b = 0; b < 2; b++) {
+                        const bx = x + (Math.random() - 0.5) * 60;
+                        const bz = z + (Math.random() - 0.5) * 60;
+                        const h = 25 + Math.random() * 70;
+                        const w = 18 + Math.random() * 15;
+                        const d = 18 + Math.random() * 15;
+
+                        const bMesh = new THREE.Mesh(
+                            new THREE.BoxGeometry(w, h, d),
+                            new THREE.MeshStandardMaterial({ color: bColors[Math.floor(Math.random() * bColors.length)], roughness: 0.3 })
+                        );
+                        bMesh.position.set(bx, h / 2, bz);
+                        bMesh.castShadow = true;
+                        bMesh.receiveShadow = true;
+                        scene.add(bMesh);
+                    }
+                }
+            }
+
+            // Bus Stops
+            mapPoints.busStops.forEach(pt => {
+                const pole = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.2, 0.2, 5),
+                    new THREE.MeshStandardMaterial({ color: 0x10b981 })
+                );
+                pole.position.copy(pt).add(new THREE.Vector3(0, 2.5, 0));
+                scene.add(pole);
+
+                const sign = new THREE.Mesh(
+                    new THREE.BoxGeometry(2.5, 1.4, 0.2),
+                    new THREE.MeshStandardMaterial({ color: 0x059669 })
+                );
+                sign.position.copy(pt).add(new THREE.Vector3(0, 4.5, 0));
+                scene.add(sign);
+            });
+
+            // Logistics Depots
+            mapPoints.cargoDepots.forEach(pt => {
+                const depot = new THREE.Mesh(
+                    new THREE.BoxGeometry(16, 7, 22),
+                    new THREE.MeshStandardMaterial({ color: 0xd97706 })
+                );
+                depot.position.copy(pt).add(new THREE.Vector3(0, 3.5, 0));
+                scene.add(depot);
+            });
+        }
+
+        /* =========================================================================
+           PROCEDURAL VEHICLE & INTERIOR MESH BUILDER
+           ========================================================================= */
+        function buildVehicle() {
+            if (vehicleGroup) scene.remove(vehicleGroup);
+
+            const vData = VEHICLES[GAME_STATE.currentVehicleIndex];
+            vehicleGroup = new THREE.Group();
+            headlights = [];
+
+            // Body Material
+            const bodyMat = new THREE.MeshStandardMaterial({ color: vData.color, metalness: 0.5, roughness: 0.3 });
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1, transparent: true, opacity: 0.7 });
+            const rimMat = new THREE.MeshStandardMaterial({ color: vData.rimColor, metalness: 0.8 });
+
+            if (vData.type === 'car') {
+                const body = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.9, 4.4), bodyMat);
+                body.position.y = 0.7;
+                body.castShadow = true;
+                vehicleGroup.add(body);
+
+                const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.75, 2.2), glassMat);
+                cabin.position.set(0, 1.4, -0.2);
+                cabin.castShadow = true;
+                vehicleGroup.add(cabin);
+
+                if (vData.hasSpoiler) {
+                    const spoilerWing = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.1, 0.5), bodyMat);
+                    spoilerWing.position.set(0, 1.4, -2.1);
+                    vehicleGroup.add(spoilerWing);
+                }
+            } else if (vData.type === 'bus') {
+                const body = new THREE.Mesh(new THREE.BoxGeometry(2.7, 2.8, 9.6), bodyMat);
+                body.position.y = 1.6;
+                body.castShadow = true;
+                vehicleGroup.add(body);
+
+                const windows = new THREE.Mesh(new THREE.BoxGeometry(2.75, 1.2, 8.6), glassMat);
+                windows.position.set(0, 2.0, -0.2);
+                vehicleGroup.add(windows);
+            } else if (vData.type === 'truck') {
+                const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.7, 2.8, 3.2), bodyMat);
+                cabin.position.set(0, 1.7, 2.2);
+                cabin.castShadow = true;
+                vehicleGroup.add(cabin);
+
+                const trailer = new THREE.Mesh(
+                    new THREE.BoxGeometry(2.8, 3.2, 8.2),
+                    new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.3 })
+                );
+                trailer.position.set(0, 2.0, -3.3);
+                trailer.castShadow = true;
+                vehicleGroup.add(trailer);
+            }
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 16);
+            wheelGeo.rotateZ(Math.PI / 2);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+
+            const wheelPositions = vData.type === 'bus' ? [
+                [-1.2, 0.45, 3.0], [1.2, 0.45, 3.0],
+                [-1.2, 0.45, -3.0], [1.2, 0.45, -3.0]
+            ] : [
+                [-1.0, 0.45, 1.4], [1.0, 0.45, 1.4],
+                [-1.0, 0.45, -1.4], [1.0, 0.45, -1.4]
+            ];
+
+            wheelPositions.forEach(pos => {
+                const w = new THREE.Mesh(wheelGeo, wheelMat);
+                w.position.set(...pos);
+                w.castShadow = true;
+
+                const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.36, 8), rimMat);
+                rim.rotateZ(Math.PI / 2);
+                w.add(rim);
+
+                vehicleGroup.add(w);
+            });
+
+            // Underglow Neon Light
+            underglowLight = new THREE.PointLight(vData.neonColor, GAME_STATE.underglowOn ? 2.0 : 0, 8);
+            underglowLight.position.set(0, 0.2, 0);
+            vehicleGroup.add(underglowLight);
+
+            // Headlights
+            const hl1 = new THREE.SpotLight(0xffffff, GAME_STATE.headlightsOn ? 2.5 : 0, 45, Math.PI / 5, 0.5);
+            hl1.position.set(-0.8, 1.0, 2.2);
+            hl1.target.position.set(-0.8, 0, 12);
+            vehicleGroup.add(hl1);
+            vehicleGroup.add(hl1.target);
+            headlights.push(hl1);
+
+            const hl2 = new THREE.SpotLight(0xffffff, GAME_STATE.headlightsOn ? 2.5 : 0, 45, Math.PI / 5, 0.5);
+            hl2.position.set(0.8, 1.0, 2.2);
+            hl2.target.position.set(0.8, 0, 12);
+            vehicleGroup.add(hl2);
+            vehicleGroup.add(hl2.target);
+            headlights.push(hl2);
+
+            // Detailed Interior (Cockpit View)
+            interiorGroup = new THREE.Group();
+            
+            const dash = new THREE.Mesh(
+                new THREE.BoxGeometry(1.6, 0.4, 0.6),
+                new THREE.MeshStandardMaterial({ color: vData.dashColor })
+            );
+            dash.position.set(0, 1.1, 0.4);
+            interiorGroup.add(dash);
+
+            const steeringWheel = new THREE.Mesh(
+                new THREE.TorusGeometry(0.22, 0.03, 8, 24),
+                new THREE.MeshStandardMaterial({ color: vData.wheelColor })
+            );
+            steeringWheel.position.set(-0.4, 1.2, 0.15);
+            steeringWheel.rotation.x = Math.PI / 4;
+            interiorGroup.add(steeringWheel);
+
+            const seatMat = new THREE.MeshStandardMaterial({ color: vData.seatColor });
+            const driverSeat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.5), seatMat);
+            driverSeat.position.set(-0.4, 0.8, -0.3);
+            interiorGroup.add(driverSeat);
+
+            vehicleGroup.add(interiorGroup);
+
+            vehicleGroup.position.copy(vehiclePos);
+            vehicleGroup.rotation.y = vehicleRotation;
+            scene.add(vehicleGroup);
+        }
+
+        /* =========================================================================
+           INPUT CONTROLS & SHORTCUTS
+           ========================================================================= */
+        function setupInputListeners() {
+            window.addEventListener('keydown', (e) => {
+                const k = e.key.toLowerCase();
+                if (k === 'w') keys.w = true;
+                if (k === 's') keys.s = true;
+                if (k === 'a') keys.a = true;
+                if (k === 'd') keys.d = true;
+                if (e.code === 'Space') keys.space = true;
+
+                // Shift + E (Gear Up), Shift + Q (Gear Down)
+                if (e.shiftKey && e.code === 'KeyE') {
+                    shiftGear(1);
+                } else if (e.shiftKey && e.code === 'KeyQ') {
+                    shiftGear(-1);
+                }
+
+                if (e.code === 'KeyC') toggleCamera();
+                if (e.code === 'KeyB') toggleGarage('shop');
+                if (e.code === 'KeyT') toggleGarage('tuning');
+                if (e.code === 'KeyL') toggleHeadlights();
+            });
+
+            window.addEventListener('keyup', (e) => {
+                const k = e.key.toLowerCase();
+                if (k === 'w') keys.w = false;
+                if (k === 's') keys.s = false;
+                if (k === 'a') keys.a = false;
+                if (k === 'd') keys.d = false;
+                if (e.code === 'Space') keys.space = false;
+            });
+
+            setupTouchButton('btn-touch-up', 'w');
+            setupTouchButton('btn-touch-down', 's');
+            setupTouchButton('btn-touch-left', 'a');
+            setupTouchButton('btn-touch-right', 'd');
+            document.getElementById('btn-touch-shift-up')?.addEventListener('click', () => shiftGear(1));
+            document.getElementById('btn-touch-shift-down')?.addEventListener('click', () => shiftGear(-1));
+        }
+
+        function setupTouchButton(id, key) {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
+            btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
+        }
+
+        function shiftGear(dir) {
+            const oldGear = currentGearIndex;
+            currentGearIndex = Math.max(0, Math.min(GEARS.length - 1, currentGearIndex + dir));
+            if (oldGear !== currentGearIndex) {
+                playShiftSound();
+                document.getElementById('gear-display').innerText = GEARS[currentGearIndex].name;
+                showToast(`기어 변속 완료: ${GEARS[currentGearIndex].name}`);
+            }
+        }
+
+        function toggleCamera() {
+            GAME_STATE.cameraMode = (GAME_STATE.cameraMode + 1) % 2;
+            showToast(GAME_STATE.cameraMode === 0 ? "3인칭 외부 카메라 시점" : "1인칭 운전석 내부 시점");
+        }
+
+        function toggleHeadlights() {
+            GAME_STATE.headlightsOn = !GAME_STATE.headlightsOn;
+            headlights.forEach(hl => hl.intensity = GAME_STATE.headlightsOn ? 2.5 : 0);
+            const btn = document.getElementById('btn-headlights');
+            btn.innerText = GAME_STATE.headlightsOn ? "ON [L]" : "OFF [L]";
+            btn.className = GAME_STATE.headlightsOn ? 
+                "px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950" : 
+                "px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700";
+        }
+
+        function toggleDayNight() {
+            GAME_STATE.isNight = !GAME_STATE.isNight;
+            scene.background.setHex(GAME_STATE.isNight ? 0x020617 : 0x0a0e17);
+            ambientLight.intensity = GAME_STATE.isNight ? 0.15 : 0.4;
+            sunLight.intensity = GAME_STATE.isNight ? 0.1 : 0.9;
+            document.getElementById('time-icon').className = GAME_STATE.isNight ? "fa-solid fa-moon text-xl text-sky-300" : "fa-solid fa-sun text-xl text-amber-300";
+            showToast(GAME_STATE.isNight ? "야간 모드 전환" : "주간 모드 전환");
+        }
+
+        function toggleUnderglow() {
+            GAME_STATE.underglowOn = !GAME_STATE.underglowOn;
+            if (underglowLight) underglowLight.intensity = GAME_STATE.underglowOn ? 2.0 : 0;
+        }
+
+        /* =========================================================================
+           PHYSICS & MOVEMENT LOOP
+           ========================================================================= */
+        function updatePhysics(delta) {
+            const vData = VEHICLES[GAME_STATE.currentVehicleIndex];
+            const activeGear = GEARS[currentGearIndex];
+
+            // Acceleration Logic
+            let accel = 0;
+            if (keys.w) {
+                if (activeGear.name === 'R') {
+                    accel = activeGear.maxSpeed * vData.accel * 0.5;
+                } else if (activeGear.name !== 'N') {
+                    accel = vData.accel * activeGear.accelMult * 55;
+                }
+            }
+
+            // Braking & Handbrake
+            if (keys.s || keys.space) {
+                if (currentSpeed > 3) currentSpeed -= vData.accel * 2.2 * delta * 10;
+                else if (currentSpeed < -3) currentSpeed += vData.accel * 2.2 * delta * 10;
+                else currentSpeed = 0;
+            } else if (!keys.w) {
+                currentSpeed *= 0.985;
+            }
+
+            // Apply Speed Limits per Gear
+            if (activeGear.name !== 'N') {
+                if (activeGear.name === 'R') {
+                    currentSpeed = Math.max(activeGear.maxSpeed, currentSpeed - accel * delta);
+                } else {
+                    currentSpeed = Math.min(activeGear.maxSpeed, currentSpeed + accel * delta);
+                }
+            }
+
+            // Steering Angle
+            const steerMax = vData.handling;
+            if (keys.a) steeringAngle = Math.min(steerMax, steeringAngle + 0.08 * delta);
+            else if (keys.d) steeringAngle = Math.max(-steerMax, steeringAngle - 0.08 * delta);
+            else steeringAngle *= 0.82;
+
+            // Apply Position
+            if (Math.abs(currentSpeed) > 0.1) {
+                const dir = currentSpeed >= 0 ? 1 : -1;
+                vehicleRotation += steeringAngle * (currentSpeed / 28) * dir;
+                
+                const moveDist = (currentSpeed / 3.6) * delta;
+                vehiclePos.x += Math.sin(vehicleRotation) * moveDist;
+                vehiclePos.z += Math.cos(vehicleRotation) * moveDist;
+
+                // Passive Cash Reward for Driving
+                GAME_STATE.distanceDriven += Math.abs(moveDist);
+                if (GAME_STATE.distanceDriven >= 80) {
+                    GAME_STATE.distanceDriven = 0;
+                    addCash(50000); // ₩50,000 per 80 meters
+                }
+            }
+
+            vehicleGroup.position.copy(vehiclePos);
+            vehicleGroup.rotation.y = vehicleRotation;
+
+            // Calculate RPM
+            const speedRatio = Math.abs(currentSpeed) / (activeGear.maxSpeed || 100);
+            currentRPM = activeGear.name === 'N' ? (keys.w ? 6500 : 800) : 800 + (speedRatio * 6200);
+
+            updateAudioEngine(currentRPM);
+            checkMissionProgress();
+        }
+
+        /* =========================================================================
+           CAMERA LOGIC
+           ========================================================================= */
+        function updateCamera() {
+            if (GAME_STATE.cameraMode === 0) {
+                const offset = new THREE.Vector3(0, 4.2, -10.5);
+                offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), vehicleRotation);
+                camera.position.copy(vehiclePos).add(offset);
+                camera.lookAt(vehiclePos.clone().add(new THREE.Vector3(0, 1.5, 0)));
+            } else {
+                const cockPitOffset = new THREE.Vector3(-0.4, 1.3, 0.2);
+                cockPitOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), vehicleRotation);
+                camera.position.copy(vehiclePos).add(cockPitOffset);
+
+                const lookTarget = vehiclePos.clone().add(
+                    new THREE.Vector3(
+                        Math.sin(vehicleRotation) * 20 - 0.4,
+                        1.2,
+                        Math.cos(vehicleRotation) * 20
+                    )
+                );
+                camera.lookAt(lookTarget);
+            }
+        }
+
+        /* =========================================================================
+           MISSIONS & REWARDS
+           ========================================================================= */
+        function checkMissionProgress() {
+            const vData = VEHICLES[GAME_STATE.currentVehicleIndex];
+
+            if (!GAME_STATE.activeMission) {
+                if (vData.type === 'bus') {
+                    startMission('passenger', '시티 라이너 버스 승객 운송 미션', mapPoints.busStops[0], 2500000);
+                } else if (vData.type === 'truck') {
+                    startMission('cargo', '물류 창고 화물 배송 미션', mapPoints.cargoDepots[0], 5000000);
+                }
+            }
+
+            if (GAME_STATE.activeMission) {
+                const distToTarget = vehiclePos.distanceTo(GAME_STATE.activeMission.targetPos);
+                if (distToTarget < 14 && Math.abs(currentSpeed) < 5) {
+                    const reward = GAME_STATE.activeMission.reward;
+                    addCash(reward);
+                    showToast(`미션 성공! 보상 +₩${reward.toLocaleString()} 획득`);
+                    GAME_STATE.activeMission = null;
+                    document.getElementById('mission-hud').classList.add('hidden');
+                }
+            }
+        }
+
+        function startMission(type, title, targetPos, reward) {
+            GAME_STATE.activeMission = { type, title, targetPos, reward };
+            document.getElementById('mission-hud').classList.remove('hidden');
+            document.getElementById('mission-title').innerText = title;
+            document.getElementById('mission-reward').innerText = `+₩${reward.toLocaleString()}`;
+        }
+
+        function addCash(amt) {
+            GAME_STATE.cash += amt;
+            document.getElementById('cash-display').innerText = `₩${GAME_STATE.cash.toLocaleString()}`;
+        }
+
+        /* =========================================================================
+           HUD & MINIMAP RENDERER
+           ========================================================================= */
+        function updateHUD() {
+            const speedKm = Math.abs(Math.round(currentSpeed));
+            document.getElementById('speed-display').innerText = speedKm;
+
+            const dashArray = 251.2;
+            const offset = dashArray - (Math.min(speedKm, 240) / 240) * dashArray;
+            document.getElementById('speed-gauge').style.strokeDashoffset = offset;
+
+            document.getElementById('rpm-text').innerText = Math.round(currentRPM);
+            document.getElementById('rpm-bar').style.width = `${Math.min(100, (currentRPM / 7000) * 100)}%`;
+
+            drawMinimap();
+        }
+
+        function drawMinimap() {
+            const canvas = document.getElementById('minimap-canvas');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const center = w / 2;
+            const scale = 0.35;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Grid
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < w; x += 20) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+            }
+            for (let y = 0; y < h; y += 20) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            }
+
+            // Mission Target Marker
+            if (GAME_STATE.activeMission) {
+                const relX = (GAME_STATE.activeMission.targetPos.x - vehiclePos.x) * scale;
+                const relZ = (GAME_STATE.activeMission.targetPos.z - vehiclePos.z) * scale;
+                
+                ctx.fillStyle = '#f59e0b';
+                ctx.beginPath();
+                ctx.arc(center + relX, center + relZ, 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Player Arrow
+            ctx.save();
+            ctx.translate(center, center);
+            ctx.rotate(-vehicleRotation);
+
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath();
+            ctx.moveTo(0, -7); ctx.lineTo(5, 7); ctx.lineTo(0, 4); ctx.lineTo(-5, 7);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        /* =========================================================================
+           WEB AUDIO ENGINE SYNTHESIZER
+           ========================================================================= */
+        function initAudio() {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+                
+                engineOsc = audioCtx.createOscillator();
+                gainNode = audioCtx.createGain();
+
+                engineOsc.type = 'sawtooth';
+                engineOsc.frequency.setValueAtTime(60, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime);
+
+                engineOsc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                engineOsc.start();
+            } catch (e) {}
+        }
+
+        function updateAudioEngine(rpm) {
+            if (engineOsc && audioCtx) {
+                const freq = 45 + (rpm / 7000) * 190;
+                engineOsc.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
+            }
+        }
+
+        function playShiftSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(320, audioCtx.currentTime);
+            g.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+            osc.connect(g);
+            g.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.12);
+        }
+
+        /* =========================================================================
+           GARAGE & TUNING MODAL LOGIC
+           ========================================================================= */
+        function toggleGarage(tab = 'shop', show) {
+            const modal = document.getElementById('garage-modal');
+            if (show === undefined) show = modal.classList.contains('hidden');
+            
+            if (show) {
+                modal.classList.remove('hidden');
+                switchGarageTab(tab);
+                renderShopCards();
+            } else {
+                modal.classList.add('hidden');
+            }
+        }
+
+        function switchGarageTab(tab) {
+            const shopContent = document.getElementById('tab-content-shop');
+            const tuningContent = document.getElementById('tab-content-tuning');
+            const shopBtn = document.getElementById('tab-btn-shop');
+            const tuningBtn = document.getElementById('tab-btn-tuning');
+
+            if (tab === 'shop') {
+                shopContent.classList.remove('hidden');
+                tuningContent.classList.add('hidden');
+                shopBtn.className = "py-2 px-4 font-bold text-sm text-amber-400 border-b-2 border-amber-400 transition";
+                tuningBtn.className = "py-2 px-4 font-bold text-sm text-slate-400 border-b-2 border-transparent hover:text-white transition";
+            } else {
+                shopContent.classList.add('hidden');
+                tuningContent.classList.remove('hidden');
+                tuningContent.classList.add('grid');
+                tuningBtn.className = "py-2 px-4 font-bold text-sm text-amber-400 border-b-2 border-amber-400 transition";
+                shopBtn.className = "py-2 px-4 font-bold text-sm text-slate-400 border-b-2 border-transparent hover:text-white transition";
+            }
+        }
+
+        function renderShopCards() {
+            const container = document.getElementById('tab-content-shop');
+            container.innerHTML = '';
+
+            VEHICLES.forEach((v, index) => {
+                const isCurrent = index === GAME_STATE.currentVehicleIndex;
+                const card = document.createElement('div');
+                card.className = `bg-slate-900/80 rounded-2xl p-4 border ${isCurrent ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-slate-800'} flex flex-col justify-between`;
+                
+                card.innerHTML = `
+                    <div>
+                        <div class="h-28 bg-slate-950 rounded-xl mb-3 flex items-center justify-center border border-slate-800">
+                            <i class="fa-solid ${v.type === 'bus' ? 'fa-bus' : v.type === 'truck' ? 'fa-truck-front' : 'fa-car-side'} text-4xl text-slate-400"></i>
+                        </div>
+                        <h4 class="font-bold text-white text-base">${v.name}</h4>
+                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">${v.desc}</p>
+                        <div class="mt-3 space-y-1 text-xs text-slate-300">
+                            <div class="flex justify-between"><span>최고 속도:</span> <span class="font-bold text-sky-400">${v.topSpeed} km/h</span></div>
+                            <div class="flex justify-between"><span>가속 능력:</span> <span class="font-bold text-emerald-400">${v.accel} m/s²</span></div>
+                        </div>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-slate-800">
+                        ${isCurrent ? 
+                            `<button class="w-full py-2 bg-slate-800 text-amber-400 font-bold rounded-xl text-xs cursor-default">탑승 중</button>` :
+                            v.unlocked ?
+                            `<button onclick="selectVehicle(${index})" class="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl text-xs transition">차량 운전하기</button>` :
+                            `<button onclick="buyVehicle(${index})" class="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex justify-center items-center space-x-1"><span>구매</span> <span class="font-black">₩${v.price.toLocaleString()}</span></button>`
+                        }
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function buyVehicle(index) {
+            const v = VEHICLES[index];
+            if (GAME_STATE.cash >= v.price) {
+                addCash(-v.price);
+                v.unlocked = true;
+                selectVehicle(index);
+                showToast(`${v.name} 차량을 구매했습니다!`);
+            } else {
+                showToast("소지금이 부족합니다!");
+            }
+        }
+
+        function selectVehicle(index) {
+            GAME_STATE.currentVehicleIndex = index;
+            buildVehicle();
+            renderShopCards();
+            showToast(`${VEHICLES[index].name}(으)로 변경되었습니다.`);
+        }
+
+        function applyTuning(type, value) {
+            const v = VEHICLES[GAME_STATE.currentVehicleIndex];
+            if (type === 'color') {
+                v.color = parseInt(value.replace('#', '0x'));
+                document.getElementById('color-hex-label').innerText = value;
+            } else if (type === 'neon') {
+                v.neonColor = parseInt(value.replace('#', '0x'));
+            } else if (type === 'rimColor') {
+                v.rimColor = parseInt(value.replace('#', '0x'));
+            } else if (type === 'spoiler') {
+                v.hasSpoiler = value === 'sport';
+            } else if (type === 'dashColor') {
+                v.dashColor = parseInt(value.replace('#', '0x'));
+            } else if (type === 'seatColor') {
+                v.seatColor = parseInt(value.replace('#', '0x'));
+            } else if (type === 'wheelColor') {
+                v.wheelColor = parseInt(value.replace('#', '0x'));
+            }
+            buildVehicle();
+        }
+
+        function buyPerformanceUpgrade(type) {
+            const v = VEHICLES[GAME_STATE.currentVehicleIndex];
+            if (type === 'engine' && GAME_STATE.cash >= 1500000) {
+                addCash(-1500000);
+                v.topSpeed += 30;
+                v.accel += 6;
+                showToast("엔진 스테이지 1 튜닝 완료!");
+            } else if (type === 'brakes' && GAME_STATE.cash >= 800000) {
+                addCash(-800000);
+                showToast("스포츠 브레이크 장착 완료!");
+            } else {
+                showToast("소지금이 부족합니다!");
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('notification-toast');
+            toast.innerText = msg;
+            toast.classList.remove('opacity-0', 'translate-y-4');
+            toast.classList.add('opacity-100', 'translate-y-0');
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-4');
+            }, 3000);
+        }
+
+        function toggleHelpModal() {
+            document.getElementById('help-modal').classList.toggle('hidden');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        /* =========================================================================
+           ANIMATION LOOP
+           ========================================================================= */
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = Math.min(clock.getDelta(), 0.1);
+
+            updatePhysics(delta);
+            updateCamera();
+            updateHUD();
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            initEngine();
+        };
+    </script>
+</body>
+</html>
